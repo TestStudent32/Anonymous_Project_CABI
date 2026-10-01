@@ -14,5 +14,10 @@ data/raw/us_federal_holidays_2018_2025.csv  columns: Date, Day, Name, Type, Deta
   temperature_2m, snowfall, wind_speed_10m, relative_humidity_2m, apparent_temperature, precipitation,
   rain, cloud_cover, wind_speed_100m, is_day, direct_radiation. Save the CSV export as-is (3 metadata lines + header).
 - **Holidays:** U.S. federal holidays 2018-2025 (104 dates), one row per holiday.
+- **Forecast weather** (`data/raw/weather_forecast_previous_day1.csv`): Open-Meteo Previous Runs API,
+  https://previous-runs-api.open-meteo.com/v1/forecast with latitude=38.910366, longitude=-77.07251,
+  start_date=2024-01-01, end_date=2025-12-31, timezone=America/New_York, °F / mph / inch, format=csv, and
+  hourly = temperature_2m, apparent_temperature, relative_humidity_2m, wind_speed_10m, precipitation, rain,
+  snowfall, cloud_cover, direct_radiation, each with the suffix `_previous_day1`.
 
 `data/processed/` is created by step 1.

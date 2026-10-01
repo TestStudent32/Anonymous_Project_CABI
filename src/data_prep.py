@@ -140,6 +140,18 @@ def load_weather(path: Path = config.WEATHER_CSV) -> pd.DataFrame:
     return df
 
 
+def load_forecast_weather(path: Path = config.FORECAST_WEATHER_CSV) -> pd.DataFrame:
+    """Archived day-ahead forecasts (Open-Meteo Previous Runs, '<var>_previous_day1'), indexed by hour,
+    renamed to the same short names as the observed weather. Where the forecast lacks `rain`, precipitation
+    is used instead (does not occur in 2025)."""
+    df = pd.read_csv(path, skiprows=[0, 1, 2])
+    df.columns = [c.strip().replace("_previous_day1", "") for c in df.columns]
+    df["datetime"] = pd.to_datetime(df["time"]).dt.floor("h")
+    df = df.drop(columns=["time"]).rename(columns=WEATHER_RENAME)
+    df["rain_inch"] = df["rain_inch"].fillna(df["precipitation_inch"])
+    return df.set_index("datetime")
+
+
 def _finish(df: pd.DataFrame, weather: pd.DataFrame, station_id) -> pd.DataFrame:
     """Merge trips with weather on the hour (inner join) and add season + id columns."""
     df = df.copy()

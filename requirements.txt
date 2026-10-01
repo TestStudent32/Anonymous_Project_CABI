@@ -11,3 +11,4 @@ matplotlib==3.11.1
 torch==2.6.0          # install the CUDA build for GPU: pip install torch --index-url https://download.pytorch.org/whl/cu124
 transformers==5.17.0
 accelerate
+chronos-forecasting==2.3.2

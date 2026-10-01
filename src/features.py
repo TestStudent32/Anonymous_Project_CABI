@@ -116,6 +116,34 @@ def _add_weather_lags(df: pd.DataFrame, horizon: int) -> None:
             df[f"{v}_lag{h}h"] = df[v].shift(max(h, horizon))
 
 
+def _add_weather_composites(df: pd.DataFrame) -> None:
+    """Station-level weather flags and interactions, all from weather at the target hour (in place)."""
+    rush = ((df["hour"] >= 7) & (df["hour"] <= 9)) | ((df["hour"] >= 16) & (df["hour"] <= 18))
+    rain = df["rain_inch"].fillna(0)
+    df["bad_weather"] = ((df["rain_inch"] > 0.1) | (df["snowfall_inch"] > 0) | (df["wind_speed_10m_mph"] > 20)).astype(int)
+    df["feels_like_diff"] = (df["apparent_temp_F"] - df["temperature_F"]).fillna(0)
+    df["temp_comfort"] = ((df["temperature_F"] >= 55) & (df["temperature_F"] <= 80)).astype(int)
+    df["rain_x_rush"] = (rain * rush).astype(float)
+    df["rain_x_leisure"] = (rain * (~rush)).astype(float)
+    df["temp_x_summer"] = (df["temperature_F"].fillna(0) * df["season_summer"]).astype(float)
+    df["temp_x_winter"] = (df["temperature_F"].fillna(0) * df["season_winter"]).astype(float)
+    df["snow_x_weekday"] = (df["snowfall_inch"].fillna(0) * (df["day_of_week"] < 5)).astype(float)
+
+
+def apply_forecast_weather(feat: pd.DataFrame, forecast: pd.DataFrame, station: bool) -> pd.DataFrame:
+    """Copy of a feature table in which weather AT THE TARGET HOUR is replaced by the archived day-ahead
+    forecast (rows without a forecast keep observed weather). Lagged weather features are left as observed,
+    since they refer to hours at or before the decision time."""
+    out = feat.copy()
+    fc = forecast.reindex(pd.DatetimeIndex(out["datetime"]))
+    for c in _WEATHER_NOW:
+        vals = fc[c].values
+        out[c] = np.where(pd.isna(vals), out[c].values, vals)
+    if station:
+        _add_weather_composites(out)
+    return out
+
+
 def system_features(df: pd.DataFrame, holidays: set, horizon: int = 1) -> pd.DataFrame:
     """Feature table for the system-wide series. The first max(336, H) hours are dropped (lag warm-up)."""
     df = add_calendar_features(df.copy(), holidays)
@@ -141,17 +169,7 @@ def station_features(df: pd.DataFrame, holidays: set, horizon: int = 1) -> pd.Da
     for t in ("outgoing", "incoming"):
         sys_vol = df[f"system_lag_168h_mean_{t}"] + 1e-6
         df[f"station_share_168h_{t}"] = np.where(sys_vol > 1e-6, df[f"lag_168h_{t}"] / sys_vol, 0)
-    # Weather composites and interactions (weather at the target hour)
-    rush = ((df["hour"] >= 7) & (df["hour"] <= 9)) | ((df["hour"] >= 16) & (df["hour"] <= 18))
-    rain = df["rain_inch"].fillna(0)
-    df["bad_weather"] = ((df["rain_inch"] > 0.1) | (df["snowfall_inch"] > 0) | (df["wind_speed_10m_mph"] > 20)).astype(int)
-    df["feels_like_diff"] = (df["apparent_temp_F"] - df["temperature_F"]).fillna(0)
-    df["temp_comfort"] = ((df["temperature_F"] >= 55) & (df["temperature_F"] <= 80)).astype(int)
-    df["rain_x_rush"] = (rain * rush).astype(float)
-    df["rain_x_leisure"] = (rain * (~rush)).astype(float)
-    df["temp_x_summer"] = (df["temperature_F"].fillna(0) * df["season_summer"]).astype(float)
-    df["temp_x_winter"] = (df["temperature_F"].fillna(0) * df["season_winter"]).astype(float)
-    df["snow_x_weekday"] = (df["snowfall_inch"].fillna(0) * (df["day_of_week"] < 5)).astype(float)
+    _add_weather_composites(df)
     for c in PROFILE_FEATURES:  # placeholders; real values come from add_station_profiles
         df[c] = 0.0
     return df.dropna(subset=STATION_FEATURES + config.TARGETS)

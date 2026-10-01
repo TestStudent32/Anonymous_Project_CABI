@@ -13,6 +13,8 @@ DATA_DIR = Path(os.environ.get("BIKESHARE_DATA_DIR", ROOT / "data"))
 RAW_TRIPS_DIR = DATA_DIR / "raw" / "trips"             # one sub-folder per year with monthly trip CSVs
 WEATHER_CSV = DATA_DIR / "raw" / "weather_open_meteo.csv"
 HOLIDAYS_CSV = DATA_DIR / "raw" / "us_federal_holidays_2018_2025.csv"
+# Archived day-ahead weather forecasts (Open-Meteo Previous Runs API, "previous_day1"), 2024-2025
+FORECAST_WEATHER_CSV = DATA_DIR / "raw" / "weather_forecast_previous_day1.csv"
 
 # --- Processed data written by scripts/01_prepare_data.py ---
 PROCESSED_DIR = DATA_DIR / "processed"
@@ -28,9 +30,11 @@ FIGURES_DIR = ROOT / "figures"
 
 # --- Experiment design ---
 TARGETS = ["outgoing_trips", "incoming_trips"]
-TRAIN_YEARS = (2018, 2023)          # inclusive
-VAL_YEAR = 2024
-TEST_YEAR = 2025
+# Main split: train 2018-2023, validate 2024, test 2025. Set BIKESHARE_TEST_YEAR=2024 for the robustness
+# split (train 2018-2022, validate 2023, test 2024); write its outputs to a separate --out-dir.
+TEST_YEAR = int(os.environ.get("BIKESHARE_TEST_YEAR", 2025))
+VAL_YEAR = TEST_YEAR - 1
+TRAIN_YEARS = (2018, TEST_YEAR - 2)  # inclusive
 HORIZONS = [1, 4, 8, 12, 24]        # hours ahead
 RANDOM_STATE = 42
 
