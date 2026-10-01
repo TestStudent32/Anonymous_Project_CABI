@@ -14,8 +14,10 @@ Time-Series Foundation Models"* (anonymous submission).
   two-stage zero-inflation, Poisson) + seasonal-naive + ARIMA; the best on validation is scored on test.
 - **Foundation models, no fine-tuning:** TimesFM 2.0, Chronos-Bolt, and Chronos-2 with and without calendar/weather
   covariates, all scored with a rolling origin at the same *T−H* information cutoff.
-- **Analyses:** 5 horizons (1–24 h); paired Wilcoxon tests across 94 station series; forecast vs. observed weather;
-  second test year; feature ablation; station-volume breakdown; a flawed "legacy" TimesFM protocol for contrast.
+- **Analyses:** 5 horizons (1–24 h); station-level paired Wilcoxon tests (directions averaged, n = 47 stations)
+  with Holm correction and station-clustered bootstrap intervals; forecast vs. observed weather; second test year;
+  station selection on training years only (5 replacement stations); feature ablation; station-volume breakdown;
+  a flawed "legacy" TimesFM protocol for contrast.
 
 ## Repository layout
 | File | What it does |
@@ -33,7 +35,7 @@ Time-Series Foundation Models"* (anonymous submission).
 | `scripts/03_run_foundation_models.py` | Step 3: foundation models → `results/<model>_<level>.csv` |
 | `scripts/04_make_tables_and_figure.py` | Step 4: writes every paper table to `tables/*.tex` and figures to `figures/` (**matplotlib**), prints all statistics (**scipy**) |
 | `scripts/05_feature_ablation.py` | System-level feature ablation → `results/ablation_system.csv` |
-| `results/` | Every result CSV behind the paper (`test2024/`: robustness split; `forecast_weather/`: forecast-weather runs) |
+| `results/` | Every result CSV behind the paper (`test2024/`: robustness split; `forecast_weather/`: forecast-weather runs; `train_selection/`: the 5 stations that enter when stations are ranked on 2018–2023 only; `station_comparisons*.csv`: all station-level tests) |
 
 ## How to run
 ```bash
@@ -60,6 +62,11 @@ python scripts/02_run_feature_models.py --level station --horizons 1 4 8 12 24 -
 for m in timesfm chronos-bolt chronos2; do python scripts/03_run_foundation_models.py --model $m --level system --out-dir results/test2024; done
 python scripts/03_run_foundation_models.py --model chronos2 --no-covariates --level system --out-dir results/test2024
 unset BIKESHARE_TEST_YEAR
+# station selection on training years only: 5 replacement stations (their files are built like the others)
+NEW="31110 31129 31223 31267 31277"
+python scripts/02_run_feature_models.py --level station --horizons 1 4 8 12 24 --stations $NEW --out-dir results/train_selection
+for m in timesfm chronos-bolt chronos2; do python scripts/03_run_foundation_models.py --model $m --level station --stations $NEW --out-dir results/train_selection; done
+python scripts/03_run_foundation_models.py --model chronos2 --no-covariates --level station --stations $NEW --out-dir results/train_selection
 python scripts/05_feature_ablation.py
 python scripts/04_make_tables_and_figure.py
 ```

@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from scipy.stats import wilcoxon  # noqa: E402
 
@@ -104,23 +105,100 @@ def table_horizons():
     write("horizons.tex", lines)
 
 
+def holm(pvals: dict) -> dict:
+    """Holm step-down adjustment of a {key: p} family; returns {key: adjusted p}."""
+    order = sorted(pvals, key=pvals.get)
+    adj, running = {}, 0.0
+    for i, k in enumerate(order):
+        running = max(running, min(1.0, (len(order) - i) * pvals[k]))
+        adj[k] = running
+    return adj
+
+
+def station_bootstrap_ci(diff_by_station, n_boot=10000, seed=42):
+    """95% CI of the mean per-station difference, resampling stations (directions stay together)."""
+    rng = np.random.default_rng(seed)
+    d = np.asarray(diff_by_station)
+    means = rng.choice(d, size=(n_boot, len(d)), replace=True).mean(axis=1)
+    return np.percentile(means, [2.5, 97.5])
+
+
+def station_comparisons(root=R):
+    """Each foundation model vs the validation-selected feature model, per horizon. The station is the unit
+    of analysis: the two directions of a station are averaged first (they are not independent), then a
+    paired two-sided Wilcoxon test over stations; p-values are Holm-adjusted over all models x horizons."""
+    feat = {h: station_selected(h, root) for h in H}
+    rows = []
+    for slug, name in FM:
+        for h in H:
+            m = feat[h].merge(fm_station(slug, root)[lambda d: d.horizon == h], on=["station_id", "target"],
+                              suffixes=("_f", "_m"))
+            st = m.groupby("station_id")[["R2_f", "R2_m"]].mean()
+            diff = st.R2_m - st.R2_f
+            lo, hi = station_bootstrap_ci(diff)
+            rows.append({"model": name, "slug": slug, "H": h, "feat": m.R2_f.mean(), "fm": m.R2_m.mean(),
+                         "wins_series": int((m.R2_m > m.R2_f).sum()), "n_series": len(m),
+                         "wins_stations": int((diff > 0).sum()), "n_stations": len(st),
+                         "p_series": wilcoxon(m.R2_m, m.R2_f).pvalue, "p_station": wilcoxon(st.R2_m, st.R2_f).pvalue,
+                         "ci_lo": lo, "ci_hi": hi,
+                         "mae_lower": int((m.MAE_m < m.MAE_f).sum())})
+    df = pd.DataFrame(rows)
+    adj = holm({i: p for i, p in df.p_station.items()})
+    df["p_holm"] = df.index.map(adj)
+    return df, feat
+
+
+TRAIN_SELECTION_NEW = ["31110", "31129", "31223", "31267", "31277"]  # top-50 by 2018-2023 volume, not in main set
+TRAIN_SELECTION_DROP = ["31107", "31119", "31236", "31278", "31324"]  # main set, outside the 2018-2023 top-50
+
+
+def selection_robustness():
+    """Station results when the 50 stations are ranked on the training years (2018-2023) only: the 42 stations
+    shared with the main set plus 5 replacements (results/train_selection/), same statistics as the main table."""
+    alt = R / "train_selection"
+    if not (alt / "chronos2_station.csv").exists():
+        print("  (train-selection runs not available)")
+        return
+    rows = []
+    for h in H:
+        main = station_selected(h)
+        new = station_selected(h, alt)
+        feat = pd.concat([main[~main.station_id.isin(TRAIN_SELECTION_DROP)], new[new.station_id.isin(TRAIN_SELECTION_NEW)]])
+        for slug, name in FM:
+            f = pd.concat([fm_station(slug).query("~station_id.isin(@TRAIN_SELECTION_DROP)"),
+                           fm_station(slug, alt).query("station_id.isin(@TRAIN_SELECTION_NEW)")])
+            m = feat.merge(f[f.horizon == h], on=["station_id", "target"], suffixes=("_f", "_m"))
+            st = m.groupby("station_id")[["R2_f", "R2_m"]].mean()
+            lo, hi = station_bootstrap_ci(st.R2_m - st.R2_f)
+            rows.append({"model": name, "H": h, "n_stations": len(st), "feat": m.R2_f.mean(), "fm": m.R2_m.mean(),
+                         "wins": int((st.R2_m > st.R2_f).sum()), "p": wilcoxon(st.R2_m, st.R2_f).pvalue,
+                         "ci_lo": lo, "ci_hi": hi})
+    df = pd.DataFrame(rows)
+    df["p_holm"] = df.index.map(holm({i: p for i, p in df.p.items()}))
+    for r in df.itertuples():
+        print(f"  [train-selected stations, n={r.n_stations}] {r.model:<17} H={r.H:>2}: {r.fm:.3f} vs {r.feat:.3f}, "
+              f"wins {r.wins}/{r.n_stations}, p_holm={r.p_holm:.2g}, CI [{r.ci_lo:+.3f}, {r.ci_hi:+.3f}]")
+    df.to_csv(R / "station_comparisons_train_selection.csv", index=False)
+
+
 def table_stations():
-    """Mean R^2 per horizon; markers from paired two-sided Wilcoxon tests vs the feature model."""
-    lines = []
-    feat = {h: station_selected(h) for h in H}
-    lines.append("Feature model (val.-selected) & " + " & ".join(f3(feat[h].R2.mean()) for h in H) + " \\\\")
+    """Mean R^2 per horizon; markers: significant after Holm correction (station-level Wilcoxon, alpha 0.05)."""
+    df, feat = station_comparisons()
+    lines = ["Feature model (val.-selected) & " + " & ".join(f3(feat[h].R2.mean()) for h in H) + " \\\\"]
     for slug, name in FM:
         cells = []
         for h in H:
-            m = feat[h].merge(fm_station(slug)[lambda d: d.horizon == h], on=["station_id", "target"], suffixes=("_f", "_m"))
-            p = wilcoxon(m.R2_m, m.R2_f).pvalue
-            mark = "" if p >= 0.01 else ("$^{+}$" if m.R2_m.mean() > m.R2_f.mean() else "$^{-}$")
-            cells.append(f3(m.R2_m.mean()) + mark)
-            print(f"  station {name:<17} H={h:>2}: mean {m.R2_m.mean():.3f} vs {m.R2_f.mean():.3f}, "
-                  f"higher in {(m.R2_m > m.R2_f).sum()}/{len(m)}, p={p:.1g}; "
-                  f"MAE {m.MAE_m.mean():.3f} vs {m.MAE_f.mean():.3f}, lower in {(m.MAE_m < m.MAE_f).sum()}/{len(m)}")
+            r = df[(df.slug == slug) & (df.H == h)].iloc[0]
+            mark = "" if r.p_holm >= 0.05 else ("$^{+}$" if r.fm > r.feat else "$^{-}$")
+            cells.append(f3(r.fm) + mark)
         lines.append(f"{name} & " + " & ".join(cells) + " \\\\")
     write("stations.tex", lines)
+    for r in df.itertuples():
+        print(f"  {r.model:<17} H={r.H:>2}: {r.fm:.3f} vs {r.feat:.3f} | series wins {r.wins_series}/{r.n_series} "
+              f"| station wins {r.wins_stations}/{r.n_stations} | p_series={r.p_series:.1g} p_station={r.p_station:.1g} "
+              f"p_holm={r.p_holm:.1g} | 95% CI of mean station gain [{r.ci_lo:+.3f}, {r.ci_hi:+.3f}] "
+              f"| lower MAE {r.mae_lower}/{r.n_series}")
+    df.to_csv(R / "station_comparisons.csv", index=False)
     for h in (1, 8):
         print(f"  validation-selected station models, H={h}: {feat[h].model.value_counts().head(4).to_dict()}")
 
@@ -146,6 +224,11 @@ def table_forecast_weather():
             f = fm_station("chronos2_fcstweather").query("horizon == 8")
             if f.station_id.nunique() == sel.station_id.nunique():  # never report a partial run
                 c2f = f3(f.R2.mean())
+                m = fw.merge(f, on=["station_id", "target"], suffixes=("_f", "_m"))
+                st = m.groupby("station_id")[["R2_f", "R2_m"]].mean()
+                lo, hi = station_bootstrap_ci(st.R2_m - st.R2_f)
+                print(f"  forecast weather, H=8, station level: Chronos-2 better at {(st.R2_m > st.R2_f).sum()}/{len(st)} "
+                      f"stations, Wilcoxon p={wilcoxon(st.R2_m, st.R2_f).pvalue:.2g}, 95% CI [{lo:+.3f}, {hi:+.3f}]")
             else:
                 print(f"  (Chronos-2 forecast-weather station run incomplete: {f.station_id.nunique()} stations)")
         lines.append(f"Station mean, $H{{=}}8$ & {f3(sel.R2.mean())} & {f3(fw.R2.mean())} & {f3(c2)} & {c2f} \\\\")
@@ -246,6 +329,7 @@ def main():
     print("Table: forecast weather");  table_forecast_weather()
     print("Table: ablation");          table_ablation()
     print("Table: gain by volume");    table_volume()
+    print("Station-selection check");  selection_robustness()
     print("Figures");                  figure_horizon(); figure_station_gain()
     print("Checks");                   checks()
 
