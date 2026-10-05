@@ -78,10 +78,17 @@ def train_val_test_split(df: pd.DataFrame):
     return train, val, test
 
 
+def hourly_index(start, end) -> pd.DatetimeIndex:
+    """Local-time hourly index WITHOUT the spring daylight-saving hours, which never occurred. Consecutive
+    entries are then exactly one elapsed hour apart, as in the row-based lags of the feature models."""
+    full = pd.date_range(start, end, freq="h")
+    exists = full.tz_localize("America/New_York", nonexistent="NaT", ambiguous=True).notna()
+    return full[exists]
+
+
 def continuous_hourly(series_df: pd.DataFrame) -> pd.DataFrame:
-    """Targets on a gap-free hourly index (used by TimesFM, which needs a contiguous context).
-    The only gaps in 2024-2025 are the non-existent spring daylight-saving hours; the few gaps are
-    filled by linear interpolation."""
+    """Targets on a contiguous elapsed-hour index (foundation models need a gap-free context). Genuine
+    missing hours (26, all in 2018-2021) are filled with the previous value, so no filled value uses
+    information from after its own hour."""
     s = series_df.set_index("datetime")[config.TARGETS]
-    full = pd.date_range(s.index.min(), s.index.max(), freq="h")
-    return s.reindex(full).interpolate(limit_direction="both")
+    return s.reindex(hourly_index(s.index.min(), s.index.max())).ffill().bfill()

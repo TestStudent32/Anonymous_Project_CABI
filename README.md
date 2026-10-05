@@ -79,6 +79,13 @@ Step 4 alone reproduces every table, number and figure from the CSVs in `results
   20 feature columns; polynomial regression uses pairwise interactions only.
 - Chronos models give median forecasts and TimesFM mean forecasts; median forecasts favour MAE, so the paper draws
   its conclusions from R².
+- Time handling: all series are in local time (America/New_York). The spring daylight-saving hours do not exist and
+  are absent; the repeated autumn hour holds the trips of both clock hours. Feature lags count rows (elapsed hours).
+  Foundation models use the same elapsed-hour sequence (`data_io.hourly_index`); the 26 genuine missing hours
+  (2018–2021, never inside a test-year context) are filled with the previous value, never with later information.
+  Forecast origins are positions in this sequence, so the origin for target *T* at horizon *H* is exactly *H* elapsed
+  hours earlier. (An earlier version inserted and interpolated the non-existent spring hour; all foundation-model
+  results were recomputed after fixing this.)
 - Weather at the target hour is observed unless `--forecast-weather` is used. The forecasts ("previous day 1") exist
   only for 2024–2025 and are complete for 2025.
 - The main-split station feature-model CSVs come from the original run of this pipeline, which the refactored code

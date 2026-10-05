@@ -179,6 +179,10 @@ def selection_robustness():
         print(f"  [train-selected stations, n={r.n_stations}] {r.model:<17} H={r.H:>2}: {r.fm:.3f} vs {r.feat:.3f}, "
               f"wins {r.wins}/{r.n_stations}, p_holm={r.p_holm:.2g}, CI [{r.ci_lo:+.3f}, {r.ci_hi:+.3f}]")
     df.to_csv(R / "station_comparisons_train_selection.csv", index=False)
+    c2 = df[df.model == "Chronos-2 + cov."]
+    write("selection.tex", [f"{r.H} & {f'{r.fm - r.feat:+.3f}'.replace('-', '$-$')} & "
+                            f"[{f'{r.ci_lo:+.3f}'.replace('-', '$-$')}, {f'{r.ci_hi:+.3f}'.replace('-', '$-$')}] & "
+                            f"{r.wins}/{r.n_stations} & {r.p_holm:.2f} \\\\" for r in c2.itertuples()])
 
 
 def table_stations():
@@ -258,6 +262,10 @@ def table_volume(h=8):
         vol[sid] = s[config.TARGETS].to_numpy().sum() / 2 / 8760
     m["vol"] = m.station_id.map(vol)
     rho = spearmanr(m.vol, m.gain)
+    # station-level version: directions averaged, so each station counts once (directions are not independent)
+    st = m.groupby("station_id")[["vol", "gain"]].mean()
+    rho_st = spearmanr(st.vol, st.gain)
+    print(f"  station level (n={len(st)}): Spearman(volume, gain) = {rho_st.correlation:.2f}, p = {rho_st.pvalue:.1g}")
     m["tier"] = pd.qcut(m.vol, 3, labels=["Low", "Middle", "High"])
     g = m.groupby("tier", observed=True).agg(n=("gain", "size"), vol=("vol", "mean"), feat=("R2_f", "mean"),
                                              fm=("R2_m", "mean"), gain=("gain", "mean"), wins=("gain", lambda x: (x > 0).sum()))

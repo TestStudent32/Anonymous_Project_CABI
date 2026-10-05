@@ -98,12 +98,14 @@ def rolling_origin(model, series: pd.Series, test_times: pd.DatetimeIndex, horiz
     pos = {t: i for i, t in enumerate(series.index)}
     cov = None if covariates is None else {c: covariates[c].values.astype(np.float32) for c in covariates.columns}
     fcov = cov if future_covariates is None else {c: future_covariates[c].values.astype(np.float32) for c in cov}
-    origins = pd.date_range(test_times.min() - pd.Timedelta(hours=max_h),
-                            test_times.max() - pd.Timedelta(hours=1), freq="h")
+    # Origins are positions in the elapsed-hour series: the origin for target T at horizon H is H entries
+    # (H elapsed hours) before T. Clock arithmetic would be wrong across daylight-saving changes.
+    t_pos = np.array([pos[t] for t in test_times])
+    origins = range(t_pos.min() - max_h, t_pos.max())
     by_origin = {}
     for b in range(0, len(origins), batch_size):
         batch = origins[b: b + batch_size]
-        spans = [(max(0, pos[o] + 1 - CONTEXT_LENGTH), pos[o] + 1) for o in batch]  # context ends at origin o
+        spans = [(max(0, o + 1 - CONTEXT_LENGTH), o + 1) for o in batch]  # context ends at origin o
         ctx = [values[s:e] for s, e in spans]
         past = fut = None
         if cov is not None:
@@ -114,7 +116,7 @@ def rolling_origin(model, series: pd.Series, test_times: pd.DatetimeIndex, horiz
                     for c, v in fcov.items()} for _, e in spans]
         for o, f in zip(batch, model.forecast(ctx, max_h, past_cov=past, future_cov=fut)):
             by_origin[o] = f[:max_h]
-    return {h: np.array([by_origin[t - pd.Timedelta(hours=h)][h - 1] for t in test_times]) for h in horizons}
+    return {h: np.array([by_origin[p - h][h - 1] for p in t_pos]) for h in horizons}
 
 
 def legacy_recursive(model: TimesFM, history: np.ndarray, n_steps: int, freq: int) -> np.ndarray:

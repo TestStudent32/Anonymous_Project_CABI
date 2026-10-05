@@ -33,9 +33,10 @@ COVARIATES = ["hour_sin", "hour_cos", "dow_sin", "dow_cos", "is_holiday_or_weeke
 
 
 def covariate_frame(df: pd.DataFrame, holidays: set, index: pd.DatetimeIndex) -> pd.DataFrame:
-    """Calendar + weather covariates on the gap-free hourly index used for the demand series."""
+    """Calendar + weather covariates on the elapsed-hour index used for the demand series; genuine gaps are
+    filled with the previous value (never with later information)."""
     cal = features.add_calendar_features(df.copy(), holidays).set_index("datetime")[COVARIATES]
-    return cal.reindex(index).interpolate(limit_direction="both")
+    return cal.reindex(index).ffill().bfill()
 
 
 def evaluate_series(model, df, test_times, holidays, use_cov, batch_size, keys, forecast=None):
@@ -61,7 +62,7 @@ def run_legacy(model, holidays):
     feat = features.system_features(data_io.load_system_data(), holidays, horizon=1)
     test_times = pd.DatetimeIndex(data_io.train_val_test_split(feat)[2]["datetime"])
     hist_end = pd.Timestamp(f"{config.VAL_YEAR}-12-31 23:00:00")
-    test_range = pd.date_range(hist_end + pd.Timedelta(hours=1), test_times.max(), freq="h")
+    test_range = data_io.hourly_index(hist_end + pd.Timedelta(hours=1), test_times.max())  # elapsed hours
     rows = []
     for target in config.TARGETS:
         for freq in (config.TIMESFM_MEDIUM_FREQ, config.TIMESFM_HIGH_FREQ):
