@@ -86,7 +86,9 @@ def table_system_h1():
         rows.append((name + " (zero-shot)", f.loc[("incoming_trips", 1), "R2"], f.loc[("outgoing_trips", 1), "R2"],
                      f.loc[("incoming_trips", 1), "MAE"], f.loc[("outgoing_trips", 1), "MAE"]))
     rows.sort(key=lambda r: -r[1])
-    lines = [f"{n} & {f3(a)} / {f3(b)} & {c:.1f} / {e:.1f} \\\\" for n, a, b, c, e in rows]
+    # ARIMA is not a 1-hour forecast: one fixed-origin forecast of the whole test year (marked in the table)
+    label = {"ARIMA": "ARIMA(2,0,2), fixed origin$^{\\dagger}$"}
+    lines = [f"{label.get(n, n)} & {f3(a)} / {f3(b)} & {c:.1f} / {e:.1f} \\\\" for n, a, b, c, e in rows]
     write("system_h1.tex", lines)
     print(pd.DataFrame(rows, columns=["model", "R2 in", "R2 out", "MAE in", "MAE out"]).round(3).to_string(index=False))
 
